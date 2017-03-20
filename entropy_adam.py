@@ -94,6 +94,6 @@ class EntropyAdam(optimizer.GradientMethod):
 
     @property
     def lr(self):
-        fix1 = 1. - self.beta1 ** self.t
-        fix2 = 1. - self.beta2 ** self.t
+        fix1 = 1. - self.beta1 ** (self.t // self.L)
+        fix2 = 1. - self.beta2 ** (self.t // self.L)
         return self.alpha * math.sqrt(fix2) / fix1
