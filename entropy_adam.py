@@ -33,30 +33,30 @@ class EntropyAdam(optimizer.GradientMethod):
             state['m'] = xp.zeros_like(param.data)
             state['v'] = xp.zeros_like(param.data)
             state['mu'] = param.data.copy()
-            state['x_prime'] = param.data.copy()
+            state['x'] = param.data.copy()
 
     def update_one_cpu(self, param, state):
         grad = param.grad
 
         # SGLD iteration
-        x_prime, mu = state['x_prime'], state['mu']
+        x, mu = state['x'], state['mu']
         if (self.t - 1) % self.L == 0:
-            x_prime[:] = param.data
+            x[:] = param.data
             mu[:] = param.data
-        dx_prime = grad - self.gamma * (param.data - x_prime)
+        dx_prime = grad - self.gamma * (x - param.data)
         noise = (numpy.sqrt(self.eta_prime)
                  * self.thermal_noise
                  * numpy.random.normal(size=param.shape))
-        x_prime += - self.eta_prime * dx_prime + noise
-        mu += (1 - self.sgld_alpha) * (x_prime - mu)
+        param.data += - self.eta_prime * dx_prime + noise
+        mu += (1 - self.sgld_alpha) * (param.data - mu)
 
         if self.t % self.L == 0:
             # Adam iteration
-            grad = self.gamma * (param.data - mu)
+            grad = self.gamma * (x - mu)
             m, v = state['m'], state['v']
             m += (1 - self.beta1) * (grad - m)
             v += (1 - self.beta2) * (grad * grad - v)
-            param.data -= self.lr * m / (numpy.sqrt(v) + self.eps)
+            param.data[:] = x - self.lr * m / (numpy.sqrt(v) + self.eps)
 
     def update_one_gpu(self, param, state):
         xp = cuda.get_array_module(param.data)
@@ -65,32 +65,32 @@ class EntropyAdam(optimizer.GradientMethod):
             size=param.shape,
             dtype=param.data.dtype)
         if (self.t - 1) % self.L == 0:
-            state['x_prime'][:] = param.data
+            state['x'][:] = param.data
             state['mu'][:] = param.data
         cuda.elementwise(
-            'T grad, T param, T gamma, T eta_prime, T thermal_noise, T noise, T sgld_alpha',  # NOQA
-            'T x_prime, T mu',
-            '''T dx_prime = grad - gamma * (param - x_prime);
-               x_prime += - eta_prime * dx_prime + noise;
-               mu += (1 - sgld_alpha) * (x_prime - mu);
+            'T grad, T x, T gamma, T eta_prime, T thermal_noise, T noise, T sgld_alpha',  # NOQA
+            'T param, T mu',
+            '''T dx_prime = grad - gamma * (x - param);
+               param += - eta_prime * dx_prime + noise;
+               mu += (1 - sgld_alpha) * (param - mu);
             ''',
             'entropy_adam_sgld')(
-                param.grad, param.data, self.gamma, self.eta_prime,
+                param.grad, state['x'], self.gamma, self.eta_prime,
                 self.thermal_noise, noise, self.sgld_alpha,
-                state['x_prime'], state['mu'])
+                param.data, state['mu'])
         if self.t % self.L == 0:
             cuda.elementwise(
-                'T gamma, T lr, T one_minus_beta1, T one_minus_beta2, T eps',
-                'T param, T m, T v, T x_prime, T mu',
-                '''T grad = gamma * (param - mu);
+                'T x, T gamma, T lr, T one_minus_beta1, T one_minus_beta2, T eps',  # NOQA
+                'T param, T m, T v, T mu',
+                '''T grad = gamma * (x - mu);
                    m += one_minus_beta1 * (grad - m);
                    v += one_minus_beta2 * (grad * grad - v);
-                   param -= lr * m / (sqrt(v) + eps);
+                   param = x - lr * m / (sqrt(v) + eps);
                 ''',
                 'entropy_adam_adam')(
-                    self.gamma, self.lr, 1 - self.beta1, 1 - self.beta2,
-                    self.eps, param.data, state['m'], state['v'],
-                    state['x_prime'], state['mu'])
+                    state['x'], self.gamma, self.lr, 1 - self.beta1,
+                    1 - self.beta2, self.eps,
+                    param.data, state['m'], state['v'], state['mu'])
 
     @property
     def lr(self):
