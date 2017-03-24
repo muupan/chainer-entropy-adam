@@ -14,12 +14,12 @@ class EntropyAdam(optimizer.GradientMethod):
 
     """
 
-    def __init__(self, alpha=0.001, beta1=0.5, beta2=0.999, eps=1e-8,
+    def __init__(self, alpha=0.001, beta1=0.9, beta2=0.999, eps=1e-8,
                  eta_prime=0.1, gamma=0.01, L=5, sgld_alpha=0.75,
                  thermal_noise=1e-4):
         self.alpha = alpha
-        self.beta1 = beta1
-        self.beta2 = beta2
+        self.beta1 = beta1 ** L
+        self.beta2 = beta2 ** L
         self.eps = eps
         self.eta_prime = eta_prime
         self.gamma = gamma
